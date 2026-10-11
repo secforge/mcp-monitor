@@ -21,7 +21,9 @@ import (
 
 	"github.com/secforge/mcp-monitor/internal/project"
 	"github.com/secforge/mcp-monitor/internal/runner"
+	"github.com/secforge/mcp-monitor/internal/selfupdate"
 	"github.com/secforge/mcp-monitor/internal/store"
+	"github.com/secforge/mcp-monitor/internal/version"
 )
 
 // EnvMaxPerMinute overrides the flood guard; 0 disables it.
@@ -85,6 +87,48 @@ func (s *Server) Register(m *server.MCPServer) {
 		mcp.WithString("id", mcp.Required(), mcp.Description("Monitor id, as returned by monitor_start or monitor_list.")),
 		mcp.WithDestructiveHintAnnotation(true),
 	), s.stop)
+	m.AddTool(mcp.NewTool("monitor_self_update",
+		mcp.WithDescription("Check GitHub for a newer mcp-monitor release and, if there is one, install it over "+
+			"this server's own binary. Checks in this order and stops at the first that says no: whether the "+
+			"binary on disk already differs from this running process (then the answer is a restart, not a "+
+			"download); whether the newest release is actually newer than this build; and whether the "+
+			"release's signed manifest and the binary verify against this project's release key. A binary "+
+			"that fails verification is never written anywhere it could be run from.\n"+
+			"Nothing about the RUNNING process changes: the user has to restart the MCP server (/mcp → "+
+			"reconnect) for it to take effect, and running monitors are restarted with it. Say so explicitly "+
+			"when reporting the result. Read-only until it finds a verified newer release."),
+		mcp.WithDestructiveHintAnnotation(false),
+	), s.selfUpdate)
+}
+
+func (s *Server) selfUpdate(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	s.adopt(req)
+	if st := selfupdate.Check(); st.Stale {
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"No update needed — one is already installed and waiting. This process is running %s while "+
+				"the binary on disk is %s. Nothing was downloaded. Ask the user to restart the MCP server; "+
+				"that alone loads the newer build.", st.Running, st.OnDisk)), nil
+	}
+	running := version.Short()
+	res, err := selfupdate.Apply(ctx, running)
+	if err != nil {
+		return mcp.NewToolResultError(fmt.Sprintf(
+			"self-update did not proceed: %v\n\nThis server is still %s and its binary is untouched.", err, running)), nil
+	}
+	if !res.Replaced {
+		latest := res.Latest
+		if latest == "" {
+			latest = "unknown"
+		}
+		return mcp.NewToolResultText(fmt.Sprintf(
+			"Already current: this server is %s and GitHub's tag for the newest release reads %s "+
+				"(unverified; nothing was downloaded).", running, latest)), nil
+	}
+	return mcp.NewToolResultText(fmt.Sprintf(
+		"Installed %s over %s at %s, verified against this project's release key.\n\n"+
+			"TELL THE USER TO RESTART THE MCP SERVER. This process is still running %s. Running monitors "+
+			"are stopped by the restart and resumed by the new process.",
+		res.Latest, running, res.Path, running)), nil
 }
 
 const startDescription = `Start a background monitor that streams events from a long-running script. Each stdout line is an event — you keep working and notifications arrive in the chat. Events arrive on their own schedule and are not replies from the user.

@@ -443,7 +443,8 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_differences_from_the_built_in_monitor">Differences from the built-in Monitor</a></li>
 <li><a href="#_project_identity_and_storage">Project identity and storage</a></li>
 <li><a href="#_process_handling">Process handling</a></li>
-<li><a href="#_build_and_install">Build and install</a></li>
+<li><a href="#_install">Install</a></li>
+<li><a href="#_releasing">Releasing</a></li>
 <li><a href="#_tests">Tests</a></li>
 </ul>
 </div>
@@ -489,6 +490,12 @@ session.</p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock"><code>monitor_stop(id)</code></p></td>
 <td class="tableblock halign-left valign-top"><p class="tableblock">Kill the monitor&#8217;s whole process group and forget it, so no later session
 resumes it. Works on a monitor owned by another session of the project too.</p></td>
+</tr>
+<tr>
+<td class="tableblock halign-left valign-top"><p class="tableblock"><code>monitor_self_update()</code></p></td>
+<td class="tableblock halign-left valign-top"><p class="tableblock">Install the newest signed release over this server&#8217;s binary, as
+<code>hub_self_update</code> does for mcp-hub. The MCP server has to be restarted to
+load it; running monitors are stopped by the restart and resumed after it.</p></td>
 </tr>
 </tbody>
 </table>
@@ -572,17 +579,73 @@ events, so such a process never takes them over.</p>
 </div>
 </div>
 <div class="sect1">
-<h2 id="_build_and_install">Build and install</h2>
+<h2 id="_install">Install</h2>
 <div class="sectionbody">
+<div class="paragraph">
+<p>Signed binaries for linux/amd64 and linux/arm64 are attached to every
+<a href="https://github.com/secforge/mcp-monitor/releases">GitHub release</a>. An
+installed server updates itself with <code>monitor_self_update</code>. Other platforms
+are not built: the runner depends on Linux process handling
+(<code>PR_SET_PDEATHSIG</code> and <code>/proc</code>).</p>
+</div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-bash" data-lang="bash">go build -o bin/mcp-monitor ./cmd/mcp-monitor
-claude mcp add -s user monitor -- /source/monitor/bin/mcp-monitor</code></pre>
+<pre class="highlight"><code class="language-bash" data-lang="bash">gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O bin/mcp-monitor
+chmod +x bin/mcp-monitor
+claude mcp add -s user monitor -- "$PWD/bin/mcp-monitor"</code></pre>
+</div>
+</div>
+<div class="paragraph">
+<p>From source, with the same experiment flag mcp-hub uses:</p>
+</div>
+<div class="listingblock">
+<div class="content">
+<pre class="highlight"><code class="language-bash" data-lang="bash">GOEXPERIMENT=jsonv2 go build -o bin/mcp-monitor ./cmd/mcp-monitor</code></pre>
 </div>
 </div>
 <div class="paragraph">
 <p>A running server keeps the binary it started with. Reconnect it with
-<code>/mcp</code> after rebuilding.</p>
+<code>/mcp</code> after replacing it.</p>
+</div>
+</div>
+</div>
+<div class="sect1">
+<h2 id="_releasing">Releasing</h2>
+<div class="sectionbody">
+<div class="paragraph">
+<p>Releases are cut exactly like mcp-hub-client&#8217;s, by <code>scripts/release.sh</code>,
+which was copied from it:</p>
+</div>
+<div class="olist arabic">
+<ol class="arabic">
+<li>
+<p>Set <code>LastRelease</code> in <code>internal/version/version.go</code> to the new version,
+commit and push.</p>
+</li>
+<li>
+<p>Run <code>scripts/release.sh vX.Y.Z</code>.</p>
+</li>
+</ol>
+</div>
+<div class="paragraph">
+<p>The script refuses to run unless the suite passes, the tree is clean, the
+tag is new, <code>LastRelease</code> matches and HEAD is on the remote. It cross-builds
+every platform with the version injected at link time, asks the native
+binary for its version, signs each binary, writes and signs
+<code>mcp-monitor-release-manifest.json</code> (version, commit and every binary&#8217;s
+sha256), verifies all signatures against the public key compiled into the
+client, and publishes the GitHub release tagged at the built commit.</p>
+</div>
+<div class="paragraph">
+<p>The Ed25519 signing key is separate from mcp-hub&#8217;s. It lives at
+<code>~/.config/mcp-monitor/release-signing.key</code> (override with
+<code>MCP_MONITOR_SIGNING_KEY</code>), its public half next to it as <code>.pub</code>. The public
+key is compiled into <code>internal/selfupdate/update.go</code>, so losing the private
+key means no installed server can ever update again: back it up.</p>
+</div>
+<div class="paragraph">
+<p>There is no chat-relay refresh step; chat-relay serves only mcp-hub
+binaries.</p>
 </div>
 </div>
 </div>
@@ -591,7 +654,7 @@ claude mcp add -s user monitor -- /source/monitor/bin/mcp-monitor</code></pre>
 <div class="sectionbody">
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-bash" data-lang="bash">go test ./...</code></pre>
+<pre class="highlight"><code class="language-bash" data-lang="bash">GOEXPERIMENT=jsonv2 go test ./...</code></pre>
 </div>
 </div>
 <div class="paragraph">
@@ -604,7 +667,7 @@ tests cover persistence, permissions and the unreadable-file case.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-10-11 19:43:24 +0200
+Last updated 2026-10-11 20:27:35 +0200
 </div>
 </div>
 </body>

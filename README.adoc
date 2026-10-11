@@ -24,6 +24,11 @@ session.
 |`monitor_stop(id)`
 |Kill the monitor's whole process group and forget it, so no later session
 resumes it. Works on a monitor owned by another session of the project too.
+
+|`monitor_self_update()`
+|Install the newest signed release over this server's binary, as
+`hub_self_update` does for mcp-hub. The MCP server has to be restarted to
+load it; running monitors are stopped by the restart and resumed after it.
 |===
 
 Notifications arrive as cross-session messages from `mcp:monitor`, start
@@ -76,22 +81,62 @@ inherited (for example when started by `claude mcp list` inside a
 session). Monitors are only resumed by a server that can actually deliver
 events, so such a process never takes them over.
 
-== Build and install
+== Install
+
+Signed binaries for linux/amd64 and linux/arm64 are attached to every
+https://github.com/secforge/mcp-monitor/releases[GitHub release]. An
+installed server updates itself with `monitor_self_update`. Other platforms
+are not built: the runner depends on Linux process handling
+(`PR_SET_PDEATHSIG` and `/proc`).
 
 [source,bash]
 ----
-go build -o bin/mcp-monitor ./cmd/mcp-monitor
-claude mcp add -s user monitor -- /source/monitor/bin/mcp-monitor
+gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O bin/mcp-monitor
+chmod +x bin/mcp-monitor
+claude mcp add -s user monitor -- "$PWD/bin/mcp-monitor"
+----
+
+From source, with the same experiment flag mcp-hub uses:
+
+[source,bash]
+----
+GOEXPERIMENT=jsonv2 go build -o bin/mcp-monitor ./cmd/mcp-monitor
 ----
 
 A running server keeps the binary it started with. Reconnect it with
-`/mcp` after rebuilding.
+`/mcp` after replacing it.
+
+== Releasing
+
+Releases are cut exactly like mcp-hub-client's, by `scripts/release.sh`,
+which was copied from it:
+
+. Set `LastRelease` in `internal/version/version.go` to the new version,
+  commit and push.
+. Run `scripts/release.sh vX.Y.Z`.
+
+The script refuses to run unless the suite passes, the tree is clean, the
+tag is new, `LastRelease` matches and HEAD is on the remote. It cross-builds
+every platform with the version injected at link time, asks the native
+binary for its version, signs each binary, writes and signs
+`mcp-monitor-release-manifest.json` (version, commit and every binary's
+sha256), verifies all signatures against the public key compiled into the
+client, and publishes the GitHub release tagged at the built commit.
+
+The Ed25519 signing key is separate from mcp-hub's. It lives at
+`~/.config/mcp-monitor/release-signing.key` (override with
+`MCP_MONITOR_SIGNING_KEY`), its public half next to it as `.pub`. The public
+key is compiled into `internal/selfupdate/update.go`, so losing the private
+key means no installed server can ever update again: back it up.
+
+There is no chat-relay refresh step; chat-relay serves only mcp-hub
+binaries.
 
 == Tests
 
 [source,bash]
 ----
-go test ./...
+GOEXPERIMENT=jsonv2 go test ./...
 ----
 
 The runner tests cover batching, exit codes, stopping a whole pipeline,
