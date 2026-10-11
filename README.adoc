@@ -84,27 +84,50 @@ events, so such a process never takes them over.
 == Install
 
 Signed binaries for linux/amd64 and linux/arm64 are attached to every
-https://github.com/secforge/mcp-monitor/releases[GitHub release]. An
-installed server updates itself with `monitor_self_update`. Other platforms
-are not built: the runner depends on Linux process handling
+https://github.com/secforge/mcp-monitor/releases[GitHub release]. Other
+platforms are not built: the runner depends on Linux process handling
 (`PR_SET_PDEATHSIG` and `/proc`).
+
+The repository is private, so download with an authenticated `gh` (a plain
+`curl` of the release URL gets a 404):
 
 [source,bash]
 ----
-gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O bin/mcp-monitor
-chmod +x bin/mcp-monitor
-claude mcp add -s user monitor -- "$PWD/bin/mcp-monitor"
+mkdir -p ~/.local/bin
+gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O ~/.local/bin/mcp-monitor
+chmod +x ~/.local/bin/mcp-monitor
+claude mcp add -s user monitor -- ~/.local/bin/mcp-monitor
 ----
 
-From source, with the same experiment flag mcp-hub uses:
+Use `mcp-monitor-linux-arm64` on arm64. Replace an installed binary that a
+running server holds open by downloading next to it and renaming over it;
+writing into it directly fails with "text file busy".
+
+=== Updating
+
+`monitor_self_update` installs a newer release the way `hub_self_update`
+does for mcp-hub: it verifies the signed manifest and the binary against the
+public key compiled into the server, then replaces its own binary.
+
+While the repository is private it cannot work: it asks GitHub's API
+without credentials and gets a 404, and reports that. Until the repository
+is public, update by repeating the download above.
+
+Either way, a running server keeps the binary it started with. Reconnect it
+with `/mcp`; its monitors are stopped by the restart and resumed after it.
+
+=== From source
+
+With the same experiment flag mcp-hub uses:
 
 [source,bash]
 ----
 GOEXPERIMENT=jsonv2 go build -o bin/mcp-monitor ./cmd/mcp-monitor
 ----
 
-A running server keeps the binary it started with. Reconnect it with
-`/mcp` after replacing it.
+A source build reports a development version
+(`<LastRelease>.<build timestamp>+<commit>`), which self-update treats as
+older than the next release.
 
 == Releasing
 

@@ -443,7 +443,12 @@ body.book #toc,body.book #preamble,body.book h1.sect0,body.book .sect1>h2{page-b
 <li><a href="#_differences_from_the_built_in_monitor">Differences from the built-in Monitor</a></li>
 <li><a href="#_project_identity_and_storage">Project identity and storage</a></li>
 <li><a href="#_process_handling">Process handling</a></li>
-<li><a href="#_install">Install</a></li>
+<li><a href="#_install">Install</a>
+<ul class="sectlevel2">
+<li><a href="#_updating">Updating</a></li>
+<li><a href="#_from_source">From source</a></li>
+</ul>
+</li>
 <li><a href="#_releasing">Releasing</a></li>
 <li><a href="#_tests">Tests</a></li>
 </ul>
@@ -583,20 +588,48 @@ events, so such a process never takes them over.</p>
 <div class="sectionbody">
 <div class="paragraph">
 <p>Signed binaries for linux/amd64 and linux/arm64 are attached to every
-<a href="https://github.com/secforge/mcp-monitor/releases">GitHub release</a>. An
-installed server updates itself with <code>monitor_self_update</code>. Other platforms
-are not built: the runner depends on Linux process handling
+<a href="https://github.com/secforge/mcp-monitor/releases">GitHub release</a>. Other
+platforms are not built: the runner depends on Linux process handling
 (<code>PR_SET_PDEATHSIG</code> and <code>/proc</code>).</p>
+</div>
+<div class="paragraph">
+<p>The repository is private, so download with an authenticated <code>gh</code> (a plain
+<code>curl</code> of the release URL gets a 404):</p>
 </div>
 <div class="listingblock">
 <div class="content">
-<pre class="highlight"><code class="language-bash" data-lang="bash">gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O bin/mcp-monitor
-chmod +x bin/mcp-monitor
-claude mcp add -s user monitor -- "$PWD/bin/mcp-monitor"</code></pre>
+<pre class="highlight"><code class="language-bash" data-lang="bash">mkdir -p ~/.local/bin
+gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O ~/.local/bin/mcp-monitor
+chmod +x ~/.local/bin/mcp-monitor
+claude mcp add -s user monitor -- ~/.local/bin/mcp-monitor</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>From source, with the same experiment flag mcp-hub uses:</p>
+<p>Use <code>mcp-monitor-linux-arm64</code> on arm64. Replace an installed binary that a
+running server holds open by downloading next to it and renaming over it;
+writing into it directly fails with "text file busy".</p>
+</div>
+<div class="sect2">
+<h3 id="_updating">Updating</h3>
+<div class="paragraph">
+<p><code>monitor_self_update</code> installs a newer release the way <code>hub_self_update</code>
+does for mcp-hub: it verifies the signed manifest and the binary against the
+public key compiled into the server, then replaces its own binary.</p>
+</div>
+<div class="paragraph">
+<p>While the repository is private it cannot work: it asks GitHub&#8217;s API
+without credentials and gets a 404, and reports that. Until the repository
+is public, update by repeating the download above.</p>
+</div>
+<div class="paragraph">
+<p>Either way, a running server keeps the binary it started with. Reconnect it
+with <code>/mcp</code>; its monitors are stopped by the restart and resumed after it.</p>
+</div>
+</div>
+<div class="sect2">
+<h3 id="_from_source">From source</h3>
+<div class="paragraph">
+<p>With the same experiment flag mcp-hub uses:</p>
 </div>
 <div class="listingblock">
 <div class="content">
@@ -604,8 +637,10 @@ claude mcp add -s user monitor -- "$PWD/bin/mcp-monitor"</code></pre>
 </div>
 </div>
 <div class="paragraph">
-<p>A running server keeps the binary it started with. Reconnect it with
-<code>/mcp</code> after replacing it.</p>
+<p>A source build reports a development version
+(<code>&lt;LastRelease&gt;.&lt;build timestamp&gt;+&lt;commit&gt;</code>), which self-update treats as
+older than the next release.</p>
+</div>
 </div>
 </div>
 </div>
@@ -667,7 +702,7 @@ tests cover persistence, permissions and the unreadable-file case.</p>
 </div>
 <div id="footer">
 <div id="footer-text">
-Last updated 2026-10-11 20:27:35 +0200
+Last updated 2026-10-11 20:39:46 +0200
 </div>
 </div>
 </body>
