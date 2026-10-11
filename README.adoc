@@ -1,0 +1,99 @@
+= mcp-monitor
+:toc:
+
+A stdio MCP server offering Claude Code's built-in `Monitor` tool without
+the timeout, with list and stop, and with monitors persisted per project.
+
+== Tools
+
+[cols="1,3"]
+|===
+|Tool |Purpose
+
+|`monitor_start(command, description)`
+|Run `command` with `bash -c` in the project directory. Each stdout line is
+an event; lines within 200ms are batched into one notification pushed into
+the session. Stderr goes only to the output file. When the command exits,
+a final notification reports its exit code. There is no timeout.
+
+|`monitor_list()`
+|This project's monitors: running in this session, running in another
+session of the same project, persisted but not running, or ended in this
+session.
+
+|`monitor_stop(id)`
+|Kill the monitor's whole process group and forget it, so no later session
+resumes it. Works on a monitor owned by another session of the project too.
+|===
+
+Notifications arrive as cross-session messages from `mcp:monitor`, start
+with `[monitor <id> · <description>]`, and end with a trailer naming the
+monitor's output file, which holds everything the command wrote.
+
+== Differences from the built-in Monitor
+
+* No timeout, so no re-arming.
+* Persistent per project. A monitor still running when its session ends is
+  restarted when the next session for the same project starts, and that
+  session is told so in one notification. A monitor that exited on its own
+  or was stopped is forgotten.
+* No `ws` source; commands only.
+* The flood guard is explicit: more than 120 notifications within a minute
+  stops the monitor with a notice. `MCP_MONITOR_MAX_EVENTS_PER_MINUTE`
+  changes the limit, and `0` disables it.
+
+== Project identity and storage
+
+Both follow `mcp-hub-client`.
+
+The project is resolved once per process: `MCP_MONITOR_PROJECT_DIR` if set,
+else `MCP_PROJECT_DIR` if set, else the first root the MCP client advertises, else the working directory.
+The path is normalised the same way as in mcp-hub: absolute, cleaned,
+symlinks resolved along the longest existing prefix.
+
+All projects share one file, `state.json`, in `MCP_MONITOR_STATE_DIR` or
+`mcp-monitor` under the OS config directory (`~/.config/mcp-monitor` on
+Linux). The directory is mode 0700, the file 0600, and every access is a
+read-modify-write under a cross-process `flock`. An unparsable file is
+reported and never overwritten. Output files live in `output/<id>.log`
+next to it and are never deleted automatically.
+
+Each entry records its owning server by pid and start time. A server
+resumes only entries whose owner is gone, so two sessions open in the same
+project do not run a monitor twice.
+
+== Process handling
+
+Each monitor runs in its own process group. Stopping it, or the server
+shutting down cleanly, signals the whole group: SIGTERM, then SIGKILL after
+two seconds. If the server is killed outright, the shell dies with it
+(`PR_SET_PDEATHSIG`), but later pipeline stages such as `tail -f` can
+survive. The next session for the project kills that leftover group before
+resuming the monitor.
+
+Like mcp-hub, the server drops a Claude messaging socket it merely
+inherited (for example when started by `claude mcp list` inside a
+session). Monitors are only resumed by a server that can actually deliver
+events, so such a process never takes them over.
+
+== Build and install
+
+[source,bash]
+----
+go build -o bin/mcp-monitor ./cmd/mcp-monitor
+claude mcp add -s user monitor -- /source/monitor/bin/mcp-monitor
+----
+
+A running server keeps the binary it started with. Reconnect it with
+`/mcp` after rebuilding.
+
+== Tests
+
+[source,bash]
+----
+go test ./...
+----
+
+The runner tests cover batching, exit codes, stopping a whole pipeline,
+the flood guard and the cleanup of a leftover process group. The store
+tests cover persistence, permissions and the unreadable-file case.
