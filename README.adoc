@@ -84,37 +84,32 @@ events, so such a process never takes them over.
 == Install
 
 Signed binaries for linux/amd64 and linux/arm64 are attached to every
-https://github.com/secforge/mcp-monitor/releases[GitHub release]. Other
-platforms are not built: the runner depends on Linux process handling
-(`PR_SET_PDEATHSIG` and `/proc`).
-
-The repository is private, so download with an authenticated `gh` (a plain
-`curl` of the release URL gets a 404):
+https://github.com/secforge/mcp-monitor/releases[GitHub release]; no Go
+toolchain needed. Other platforms are not built: the runner depends on
+Linux process handling (`PR_SET_PDEATHSIG` and `/proc`).
 
 [source,bash]
 ----
 mkdir -p ~/.local/bin
-gh release download -R secforge/mcp-monitor -p 'mcp-monitor-linux-amd64' -O ~/.local/bin/mcp-monitor
+curl -fL -o ~/.local/bin/mcp-monitor \
+  https://github.com/secforge/mcp-monitor/releases/latest/download/mcp-monitor-linux-amd64
 chmod +x ~/.local/bin/mcp-monitor
 claude mcp add -s user monitor -- ~/.local/bin/mcp-monitor
 ----
 
-Use `mcp-monitor-linux-arm64` on arm64. Replace an installed binary that a
-running server holds open by downloading next to it and renaming over it;
-writing into it directly fails with "text file busy".
+Use `mcp-monitor-linux-arm64` on arm64.
 
 === Updating
 
-`monitor_self_update` installs a newer release the way `hub_self_update`
-does for mcp-hub: it verifies the signed manifest and the binary against the
-public key compiled into the server, then replaces its own binary.
+Once installed, the server updates itself: `monitor_self_update` downloads
+a newer release, verifies its signed manifest and the binary against the
+public key compiled into the server, and replaces its own binary, as
+`hub_self_update` does for mcp-hub.
 
-While the repository is private it cannot work: it asks GitHub's API
-without credentials and gets a 404, and reports that. Until the repository
-is public, update by repeating the download above.
-
-Either way, a running server keeps the binary it started with. Reconnect it
-with `/mcp`; its monitors are stopped by the restart and resumed after it.
+A running server keeps the binary it started with. Reconnect it with
+`/mcp`; its monitors are stopped by the restart and resumed after it. To
+replace the binary by hand while a server runs from it, download next to it
+and rename over it; writing into it directly fails with "text file busy".
 
 === From source
 
