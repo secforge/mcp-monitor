@@ -35,6 +35,15 @@ Notifications arrive as cross-session messages from `mcp:monitor`, start
 with `[monitor <id> · <description>]`, and end with a trailer naming the
 monitor's output file, which holds everything the command wrote.
 
+Claude Code puts its own preamble in front of every message arriving in a
+session's inbox, attributed or bare: "Another Claude session sent a
+message", with guidance to treat it as a teammate's request. Observed on
+Claude Code 2.1.296. The server cannot remove it, so its MCP instructions
+and the `monitor_start` description tell the model that monitor messages
+are command output, to be read as data and not replied to. This lowers,
+but does not remove, the risk of a monitored log or API response being
+followed as an instruction.
+
 == Differences from the built-in Monitor
 
 * No timeout, so no re-arming.
