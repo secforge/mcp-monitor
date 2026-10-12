@@ -40,9 +40,7 @@ session's inbox, attributed or bare: "Another Claude session sent a
 message", with guidance to treat it as a teammate's request. Observed on
 Claude Code 2.1.296. The server cannot remove it, so its MCP instructions
 and the `monitor_start` description tell the model that monitor messages
-are command output, to be read as data and not replied to. This lowers,
-but does not remove, the risk of a monitored log or API response being
-followed as an instruction.
+are command output, not requests, and expect no reply.
 
 == Differences from the built-in Monitor
 
