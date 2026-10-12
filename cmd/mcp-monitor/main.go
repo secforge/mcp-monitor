@@ -22,7 +22,7 @@ func main() {
 	// Before the delivery channel is opened: a socket inherited from a
 	// session this process does not serve must not receive its events.
 	harness.ReleaseInheritedSession()
-	s := server.NewMCPServer("mcp-monitor", version.Short(), server.WithToolCapabilities(false), server.WithRoots())
+	s := server.NewMCPServer("mcp-monitor", version.Short(), server.WithToolCapabilities(false), server.WithRoots(), server.WithInstructions(tools.Instructions))
 	t := tools.New()
 	t.Register(s)
 	err := server.ServeStdio(s)
