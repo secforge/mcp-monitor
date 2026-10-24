@@ -1,8 +1,17 @@
-// Package store persists monitors per project in one file per machine,
-// laid out like mcp-hub-client's connection store: state.json under the OS
-// config directory (or MCP_MONITOR_STATE_DIR), mode 0600 in a 0700
-// directory, every access a full read-modify-write under a cross-process
-// advisory lock.
+// Package store persists everything mcp-monitor keeps, for every project on
+// the machine, in one JSON file laid out like mcp-hub-client's store:
+// project first, then that project's monitors and schedules.
+//
+//	{
+//	  "/source/products/x": {
+//	    "monitors":  { "mon-…": {…} },
+//	    "schedules": { "sch-…": {…} }
+//	  }
+//	}
+//
+// The file is state.json under the OS config directory (or
+// MCP_MONITOR_STATE_DIR), mode 0600 in a 0700 directory, and every access is
+// a full read-modify-write under one cross-process advisory lock.
 package store
 
 import (
@@ -15,11 +24,18 @@ import (
 	"time"
 
 	"github.com/gofrs/flock"
+
+	"github.com/secforge/mcp-monitor/internal/schedule"
 )
 
 // EnvDir overrides the directory holding state.json, its lock and the
 // monitors' output files.
 const EnvDir = "MCP_MONITOR_STATE_DIR"
+
+const (
+	fileName = "state.json"
+	lockName = fileName + ".lock"
+)
 
 // Entry is one persisted monitor.
 type Entry struct {
@@ -40,25 +56,63 @@ type Entry struct {
 	GroupStart string `json:"groupStart,omitempty"`
 }
 
-// State is the whole file: project -> monitor id -> entry.
-type State struct {
-	Projects map[string]map[string]*Entry `json:"projects"`
+// Project is everything kept for one project.
+type Project struct {
+	Monitors  map[string]*Entry             `json:"monitors,omitempty"`
+	Schedules map[string]*schedule.Schedule `json:"schedules,omitempty"`
 }
 
-// Monitors returns the project's map, creating it when create is set.
-func (s *State) Monitors(project string, create bool) map[string]*Entry {
-	if s.Projects == nil {
+// State is the whole file: project -> its monitors and schedules.
+type State map[string]*Project
+
+func (s *State) project(p string, create bool) *Project {
+	if *s == nil {
 		if !create {
 			return nil
 		}
-		s.Projects = map[string]map[string]*Entry{}
+		*s = State{}
 	}
-	m := s.Projects[project]
-	if m == nil && create {
-		m = map[string]*Entry{}
-		s.Projects[project] = m
+	pr := (*s)[p]
+	if pr == nil && create {
+		pr = &Project{}
+		(*s)[p] = pr
 	}
-	return m
+	return pr
+}
+
+// Monitors returns the project's monitors, creating the map when create is
+// set; nil when there are none and create is not set.
+func (s *State) Monitors(p string, create bool) map[string]*Entry {
+	pr := s.project(p, create)
+	if pr == nil {
+		return nil
+	}
+	if pr.Monitors == nil && create {
+		pr.Monitors = map[string]*Entry{}
+	}
+	return pr.Monitors
+}
+
+// Schedules returns the project's schedules, as Monitors does.
+func (s *State) Schedules(p string, create bool) map[string]*schedule.Schedule {
+	pr := s.project(p, create)
+	if pr == nil {
+		return nil
+	}
+	if pr.Schedules == nil && create {
+		pr.Schedules = map[string]*schedule.Schedule{}
+	}
+	return pr.Schedules
+}
+
+// prune drops projects with nothing left in them, so the file does not
+// collect an empty object for every project ever opened.
+func (s State) prune() {
+	for p, pr := range s {
+		if pr == nil || (len(pr.Monitors) == 0 && len(pr.Schedules) == 0) {
+			delete(s, p)
+		}
+	}
 }
 
 // Dir is where state.json lives. Never the working directory.
@@ -77,7 +131,7 @@ func OutputPath(id string) string {
 	return filepath.Join(Dir(), "output", id+".log")
 }
 
-// Update runs fn on the state under an exclusive lock and saves the result
+// Update runs fn on the state under the exclusive lock and saves the result
 // unless fn returns an error.
 func Update(fn func(*State) error) error {
 	return withLock(true, func(d string) error {
@@ -92,7 +146,7 @@ func Update(fn func(*State) error) error {
 	})
 }
 
-// Read runs fn on the state under a shared lock.
+// Read runs fn on the state under the shared lock.
 func Read(fn func(*State) error) error {
 	return withLock(false, func(d string) error {
 		s, err := load(d)
@@ -108,7 +162,7 @@ func withLock(exclusive bool, fn func(d string) error) error {
 	if err := ensureDir(d); err != nil {
 		return err
 	}
-	fl := flock.New(filepath.Join(d, "state.json.lock"))
+	fl := flock.New(filepath.Join(d, lockName))
 	var err error
 	if exclusive {
 		err = fl.Lock()
@@ -133,29 +187,40 @@ func ensureDir(d string) error {
 }
 
 func load(d string) (State, error) {
-	p := filepath.Join(d, "state.json")
-	data, err := os.ReadFile(p)
-	if errors.Is(err, fs.ErrNotExist) {
-		return State{}, nil
-	}
-	if err != nil {
-		return State{}, fmt.Errorf("reading %s: %w", p, err)
-	}
-	var s State
-	if err := json.Unmarshal(data, &s); err != nil {
-		// Left in place: overwriting it would silently drop every
-		// project's monitors.
-		return State{}, fmt.Errorf("parsing %s: %v (repair or remove it; nothing here will overwrite it)", p, err)
+	s := State{}
+	if err := loadFile(filepath.Join(d, fileName), &s); err != nil {
+		return nil, err
 	}
 	return s, nil
 }
 
 func save(d string, s State) error {
-	data, err := json.MarshalIndent(s, "", "  ")
+	s.prune()
+	return saveFile(filepath.Join(d, fileName), s)
+}
+
+// loadFile reads one JSON file into v; a missing file leaves v untouched.
+func loadFile(p string, v any) error {
+	data, err := os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", p, err)
+	}
+	if err := json.Unmarshal(data, v); err != nil {
+		// Left in place: overwriting it would silently drop every
+		// project's entries.
+		return fmt.Errorf("parsing %s: %v (repair or remove it; nothing here will overwrite it)", p, err)
+	}
+	return nil
+}
+
+func saveFile(target string, v any) error {
+	data, err := json.MarshalIndent(v, "", "  ")
 	if err != nil {
 		return err
 	}
-	target := filepath.Join(d, "state.json")
 	tmp := target + ".tmp"
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {

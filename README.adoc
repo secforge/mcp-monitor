@@ -16,14 +16,20 @@ an event; lines within 200ms are batched into one notification pushed into
 the session. Stderr goes only to the output file. When the command exits,
 a final notification reports its exit code. There is no timeout.
 
+|`monitor_schedule(command, description, at \| cron)`
+|Start `command` as a monitor later: once at `at`, or repeatedly on the
+`cron` schedule. See <<_schedules>>.
+
 |`monitor_list()`
-|This project's monitors: running in this session, running in another
+|This project's monitors (running in this session, running in another
 session of the same project, persisted but not running, or ended in this
-session.
+session) and its schedules with their next run.
 
 |`monitor_stop(id)`
-|Kill the monitor's whole process group and forget it, so no later session
-resumes it. Works on a monitor owned by another session of the project too.
+|Given a monitor id (`mon-…`), kill the monitor's whole process group and
+forget it, so no later session resumes it. Works on a monitor owned by
+another session of the project too. Given a schedule id (`sch-…`), delete
+the schedule; a monitor it already started keeps running.
 
 |`monitor_self_update()`
 |Install the newest signed release over this server's binary, as
@@ -61,6 +67,47 @@ in the output is replaced. This does not authenticate the sender, since any
 process in the session can still write a whole message to its inbox; it
 keeps the monitored source from impersonating the server.
 
+== Schedules
+
+`monitor_schedule` registers a command to be started later. Each run is an
+ordinary monitor, as if `monitor_start` had been called at that moment, so
+it is fenced, listed, stoppable and resumed like any other.
+
+`at`:: Run once, at an RFC 3339 time with an explicit offset, such as
+`2026-10-25T21:00:00+02:00`. A time without an offset is refused, because it
+would depend on the server's zone and is ambiguous across a DST change. The
+time must be in the future. The schedule is deleted once it has run.
+
+`cron`:: Run repeatedly. Five fields (minute, hour, day of month, month,
+day of week), names allowed (`mon-fri`, `jan`), or a descriptor such as
+`@hourly`, `@daily`, `@weekly` or `@every 90m`. The expression is read in
+the server's local time zone unless it is prefixed with
+`CRON_TZ=<IANA zone>`, as in `CRON_TZ=UTC 0 3 * * *`.
+
+Schedules belong to the project and are run by whichever session of the
+project is open and can push into its conversation. A run is claimed under
+the store lock before it starts, so two sessions of the same project never
+both start it.
+
+Missed runs are not lost. If a run's time passes while no session of the
+project is running, the next session to start runs it once and says it was
+missed. A cron schedule that missed several runs catches up with one run,
+not one per missed occurrence. A schedule only runs while some session of
+its project is open; a project nobody opens again never runs its schedules.
+
+A cron run that comes due while the schedule's previous run is still going
+is skipped and counted. Only the first skip in a row is announced;
+`monitor_list` shows every schedule's runs and skips.
+
+Every run is announced by the server, outside any output fence:
+
+----
+[schedule sch-1a2b3c4d · nightly sync] started monitor mon-5e6f7a8b (due 2026-10-25 03:00:00 CET). Next run: 2026-10-26 03:00:00 CET. Output file: …
+----
+
+A schedule runs its command later without asking again. Treat creating
+one like running the command now, for every future run.
+
 == Differences from the built-in Monitor
 
 * No timeout, so no re-arming.
@@ -82,9 +129,22 @@ else `MCP_PROJECT_DIR` if set, else the first root the MCP client advertises, el
 The path is normalised the same way as in mcp-hub: absolute, cleaned,
 symlinks resolved along the longest existing prefix.
 
-All projects share one file, `state.json`, in `MCP_MONITOR_STATE_DIR` or
-`mcp-monitor` under the OS config directory (`~/.config/mcp-monitor` on
-Linux). The directory is mode 0700, the file 0600, and every access is a
+All state for all projects is one file, `state.json`, in
+`MCP_MONITOR_STATE_DIR` or `mcp-monitor` under the OS config directory
+(`~/.config/mcp-monitor` on Linux). As in mcp-hub, the project is the
+top-level key:
+
+[source,json]
+----
+{
+  "/source/products/x": {
+    "monitors":  { "mon-…": { … } },
+    "schedules": { "sch-…": { … } }
+  }
+}
+----
+
+The directory is mode 0700, the file 0600, and every access is a
 read-modify-write under a cross-process `flock`. An unparsable file is
 reported and never overwritten. Output files live in `output/<id>.log`
 next to it and are never deleted automatically.
@@ -185,4 +245,8 @@ GOEXPERIMENT=jsonv2 go test ./...
 
 The runner tests cover batching, exit codes, stopping a whole pipeline,
 the flood guard and the cleanup of a leftover process group. The store
-tests cover persistence, permissions and the unreadable-file case.
+tests cover the project-keyed layout, permissions and the unreadable-file
+case. The
+schedule tests cover parsing, time zones, once runs, missed runs, catching
+up a cron schedule with a single run, skipping while the previous run is
+going, and that a claimed run is not claimed again.

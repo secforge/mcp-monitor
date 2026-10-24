@@ -5,6 +5,7 @@ go 1.25.5
 require (
 	github.com/gofrs/flock v0.13.1
 	github.com/mark3labs/mcp-go v0.58.0
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/secforge/harness-transport v0.2.1
 )
 
